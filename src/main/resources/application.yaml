@@ -5,6 +5,21 @@ spring:
   application:
     name: transaction-service
 
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: transaction-service-group
+      auto-offset-reset: latest
+      enable-auto-commit: true
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: "*"
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.retail.transaction.dto.TransformationEvent
+
   datasource:
     url: jdbc:mysql://localhost:3306/retail_db
     username: root
@@ -13,4 +28,19 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
+
+app:
+  kafka:
+    topic:
+      transformation-events: transformation-events
+
+document:
+  service:
+    url: http://localhost:5054
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket-name: documents
 
