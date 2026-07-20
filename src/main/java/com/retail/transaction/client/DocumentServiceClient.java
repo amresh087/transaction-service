@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 
 import com.retail.transaction.dto.TransformationJobStatusRequest;
 
-@FeignClient(name = "document-service", url = "${document.service.url:http://localhost:5054}")
+@FeignClient(name = "document-service", url = "${document.service.url}")
 public interface DocumentServiceClient {
 
     @PutMapping("/documents/jobs/{jobId}")

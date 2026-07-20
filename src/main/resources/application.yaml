@@ -5,6 +5,15 @@ spring:
   application:
     name: transaction-service
 
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 10000      # 10 seconds
+            readTimeout: 300000        # 5 minutes
+            loggerLevel: full
+
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
@@ -24,6 +33,7 @@ spring:
     url: jdbc:mysql://localhost:3306/retail_db
     username: root
     password: ellenverma
+
   jpa:
     hibernate:
       ddl-auto: update
@@ -38,9 +48,12 @@ document:
   service:
     url: http://localhost:5054
 
+ai:
+  service:
+    url: http://localhost:5056
+
 minio:
   endpoint: http://localhost:9000
   access-key: minioadmin
   secret-key: minioadmin
   bucket-name: documents
-
