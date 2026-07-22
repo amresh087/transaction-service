@@ -43,6 +43,7 @@ app:
   kafka:
     topic:
       transformation-events: transformation-events
+      edi-data-event: edi-data-event
 
 document:
   service:
