@@ -2,7 +2,6 @@ package com.retail.transaction.service;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -15,17 +14,13 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.dataformat.xml.XmlMapper;
-import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlElementWrapper;
-import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty;
-import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import com.retail.transaction.client.AiTranformationServiceClient;
 import com.retail.transaction.dto.EdiDataEvent;
 import com.retail.transaction.dto.TransactionResponse;
 import com.retail.transaction.dto.TransactionTypeRequest;
 import com.retail.transaction.dto.TransactionTypeResponse;
 import com.retail.transaction.dto.TransformationEvent;
+import com.retail.transaction.edi.EdiConverter;
 import com.retail.transaction.entity.TransactionType;
 import com.retail.transaction.repository.TransactionTypeRepository;
 
@@ -43,6 +38,7 @@ public class TransactionService {
     private final MinioClient minioClient;
     private final AiTranformationServiceClient aiTranformationServiceClient;
     private final KafkaTemplate<String, EdiDataEvent> ediDataEventKafkaTemplate;
+    private final EdiConverter ediConverter;
 
     @Value("${minio.bucket-name}")
     private String bucketName;
@@ -142,8 +138,8 @@ public class TransactionService {
             log.info("Downloaded transformation file {} from MinIO bucket {}. Content length: {}",
                     event.getObjectName(), bucketName, fileContent.length());
 
-            //String xmlPayload = convertEdiToXml(fileContent);
-            log.info("Converted EDI payload for {} into XML with {} characters", event.getObjectName(), fileContent.length());
+            String xmlPayload = ediConverter.convertToXml(fileContent);
+            log.info("Converted EDI payload for {} into XML with {} characters", event.getObjectName(), xmlPayload.length());
 
             EdiDataEvent ediDataEvent = EdiDataEvent.builder()
                     .documentId(event.getDocumentId())
@@ -157,7 +153,7 @@ public class TransactionService {
                     .eventType(event.getEventType())
                     .jobId(event.getJobId())
                     .timestamp(event.getTimestamp() != null ? java.time.LocalDateTime.parse(event.getTimestamp()) : null)
-                    .payload(fileContent)
+                    .payload(xmlPayload)
                     .build();
 
             Message<EdiDataEvent> message = MessageBuilder
@@ -177,191 +173,7 @@ public class TransactionService {
         }
     }
 
-    /**
-     * 
-     * @param ediContent
-     * @return
-     */
 
-    String convertEdiToXml(String ediContent) {
-        if (!StringUtils.hasText(ediContent)) {
-            return "<edi/>";
-        }
-
-        String normalizedContent = ediContent.replace("\r\n", "\n")
-                .replace("\r", "\n")
-                .trim();
-
-        char elementSeparator;
-        char releaseIndicator;
-        char segmentTerminator;
-
-        if (normalizedContent.startsWith("UNA") && normalizedContent.length() >= 9) {
-            String unaHeader = normalizedContent.substring(0, 9);
-            elementSeparator = unaHeader.charAt(4);
-            releaseIndicator = unaHeader.charAt(6);
-            segmentTerminator = unaHeader.charAt(8);
-            normalizedContent = normalizedContent.substring(9).trim();
-        } else {
-            elementSeparator = '+';
-            releaseIndicator = '?';
-            segmentTerminator = '\'';
-        }
-
-        EdiDocument document = new EdiDocument();
-        splitEdiSegments(normalizedContent, segmentTerminator, releaseIndicator).stream()
-                .map(String::trim)
-                .filter(segment -> !segment.isEmpty())
-                .forEach(segmentText -> {
-                    List<String> parts = splitEdiElements(segmentText, elementSeparator, releaseIndicator);
-                    if (parts.isEmpty()) {
-                        return;
-                    }
-
-                    String segmentName = parts.get(0);
-                    List<String> fields = new ArrayList<>();
-                    for (int index = 1; index < parts.size(); index++) {
-                        String field = parts.get(index);
-                        if (StringUtils.hasText(field)) {
-                            fields.add(field);
-                        }
-                    }
-
-                    document.getSegments().add(new EdiSegment(segmentName, fields));
-                });
-
-        try {
-            return new XmlMapper().writeValueAsString(document);
-        } catch (JsonProcessingException ex) {
-            log.warn("Unable to serialize EDI content to XML, returning a fallback payload", ex);
-            return "<edi><fallback>Unable to convert</fallback></edi>";
-        }
-    }
-
-    /**
-     * 
-     * @param content
-     * @param segmentTerminator
-     * @param releaseIndicator
-     * @return
-     */
-    private List<String> splitEdiSegments(String content, char segmentTerminator, char releaseIndicator) {
-        List<String> segments = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean escaped = false;
-
-        for (int i = 0; i < content.length(); i++) {
-            char c = content.charAt(i);
-            if (escaped) {
-                current.append(c);
-                escaped = false;
-                continue;
-            }
-
-            if (c == releaseIndicator) {
-                escaped = true;
-                continue;
-            }
-
-            if (c == segmentTerminator) {
-                String segment = current.toString().trim();
-                if (StringUtils.hasText(segment)) {
-                    segments.add(segment);
-                }
-                current.setLength(0);
-                continue;
-            }
-
-            current.append(c);
-        }
-
-        String lastSegment = current.toString().trim();
-        if (StringUtils.hasText(lastSegment)) {
-            segments.add(lastSegment);
-        }
-
-        return segments;
-    }
-
-    /**
-     * 
-     * @param segmentText
-     * @param elementSeparator
-     * @param releaseIndicator
-     * @return
-     */
-    private List<String> splitEdiElements(String segmentText, char elementSeparator, char releaseIndicator) {
-        List<String> elements = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean escaped = false;
-
-        for (int i = 0; i < segmentText.length(); i++) {
-            char c = segmentText.charAt(i);
-            if (escaped) {
-                current.append(c);
-                escaped = false;
-                continue;
-            }
-
-            if (c == releaseIndicator) {
-                escaped = true;
-                continue;
-            }
-
-            if (c == elementSeparator) {
-                elements.add(current.toString());
-                current.setLength(0);
-                continue;
-            }
-
-            current.append(c);
-        }
-
-        elements.add(current.toString());
-        return elements;
-    }
-
-    /**
-     * 
-     * EdiDocument
-     */
-    @JacksonXmlRootElement(localName = "edi")
-    static class EdiDocument {
-        @JacksonXmlElementWrapper(useWrapping = false)
-        @JacksonXmlProperty(localName = "segment")
-        private final List<EdiSegment> segments = new ArrayList<>();
-
-        public List<EdiSegment> getSegments() {
-            return segments;
-        }
-    }
-
-    /**
-     * 
-     * EdiSegment
-     */
-
-    static class EdiSegment {
-        @JacksonXmlProperty(isAttribute = true)
-        private final String name;
-
-        @JacksonXmlElementWrapper(useWrapping = false)
-        @JacksonXmlProperty(localName = "field")
-        private final List<String> fields;
-
-        EdiSegment(String name, List<String> fields) {
-            this.name = name;
-            this.fields = fields;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public List<String> getFields() {
-            return fields;
-        }
-    }
 
     /**
      * Converts a TransactionType entity to a TransactionTypeResponse.
