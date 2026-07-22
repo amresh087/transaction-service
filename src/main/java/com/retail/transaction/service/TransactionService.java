@@ -36,7 +36,6 @@ public class TransactionService {
 
     private final TransactionTypeRepository transactionTypeRepository;
     private final MinioClient minioClient;
-    private final AiTranformationServiceClient aiTranformationServiceClient;
     private final KafkaTemplate<String, EdiDataEvent> ediDataEventKafkaTemplate;
     private final EdiConverter ediConverter;
 
