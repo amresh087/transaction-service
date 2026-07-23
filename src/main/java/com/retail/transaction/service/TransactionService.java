@@ -14,7 +14,6 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import com.retail.transaction.client.AiTranformationServiceClient;
 import com.retail.transaction.dto.EdiDataEvent;
 import com.retail.transaction.dto.TransactionResponse;
 import com.retail.transaction.dto.TransactionTypeRequest;
