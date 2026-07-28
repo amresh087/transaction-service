@@ -1,5 +1,6 @@
 package com.retail.transaction.service;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -23,8 +24,11 @@ import com.retail.transaction.edi.EdiConverter;
 import com.retail.transaction.entity.TransactionType;
 import com.retail.transaction.repository.TransactionTypeRepository;
 
+import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
+import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
+import io.minio.PutObjectArgs;
 import lombok.RequiredArgsConstructor;
 import com.retail.transaction.client.DocumentServiceClient;
 import com.retail.transaction.dto.TransformationJobStatusRequest;
@@ -157,6 +161,8 @@ public class TransactionService {
                     .payload(xmlPayload)
                     .build();
 
+            saveEdiXmlToMinio(xmlPayload, ediDataEvent);
+
             Message<EdiDataEvent> message = MessageBuilder
                     .withPayload(ediDataEvent)
                     .setHeader(KafkaHeaders.TOPIC, ediDataEventTopic)
@@ -166,6 +172,8 @@ public class TransactionService {
                     .build();
 
             ediDataEventKafkaTemplate.send(message);
+           
+           
             log.info("Published EDI data event to Kafka topic {} for object {}", ediDataEventTopic,
                     event.getObjectName());
                     
@@ -203,5 +211,69 @@ public class TransactionService {
                 .documentName(entity.getDocumentName())
                 .purpose(entity.getPurpose())
                 .build();
+    }
+
+    private void saveEdiXmlToMinio(String xmlPayload, EdiDataEvent ediDataEvent) {
+        if (!StringUtils.hasText(xmlPayload) || ediDataEvent == null) {
+            log.warn("No EDI XML payload available to save to MinIO");
+            return;
+        }
+
+        try {
+            String resolvedBucketName = StringUtils.hasText(bucketName) ? bucketName : "documents";
+            String objectName = buildEdiXmlObjectName(ediDataEvent);
+
+            boolean exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(resolvedBucketName).build());
+            if (!exists) {
+                minioClient.makeBucket(MakeBucketArgs.builder().bucket(resolvedBucketName).build());
+            }
+
+            byte[] contentBytes = xmlPayload.getBytes(StandardCharsets.UTF_8);
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(resolvedBucketName)
+                    .object(objectName)
+                    .stream(new ByteArrayInputStream(contentBytes), contentBytes.length, -1)
+                    .contentType("application/xml")
+                    .build());
+
+            log.info("Saved EDI XML to MinIO bucket {}/{}", resolvedBucketName, objectName);
+        } catch (Exception ex) {
+            log.error("Failed to save EDI XML to MinIO for document {}", ediDataEvent.getDocumentId(), ex);
+        }
+    }
+
+    public String getXmlByDocumentAndType(String documentId, String xmlType) {
+        if (!StringUtils.hasText(documentId)) {
+            throw new IllegalArgumentException("documentId is required");
+        }
+        if (!StringUtils.hasText(xmlType)) {
+            throw new IllegalArgumentException("xmlType is required");
+        }
+
+        String objectName = resolveXmlObjectName(documentId, xmlType);
+
+        try (InputStream objectStream = minioClient.getObject(
+                GetObjectArgs.builder().bucket(bucketName).object(objectName).build())) {
+            return new String(objectStream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            log.warn("Could not load XML from MinIO for {} at {}: {}", documentId, objectName, ex.getMessage());
+            return null;
+        }
+    }
+
+    static String resolveXmlObjectName(String documentId, String xmlType) {
+        String normalizedType = xmlType.trim().toLowerCase();
+        if ("edixml".equals(normalizedType)) {
+            return "edixml/" + documentId + ".xml";
+        }
+        if ("idocxml".equals(normalizedType)) {
+            return "inbound/" + documentId + ".xml";
+        }
+        throw new IllegalArgumentException("xmlType must be either 'edixml' or 'idocxml'");
+    }
+
+    private String buildEdiXmlObjectName(EdiDataEvent ediDataEvent) {
+        String documentId = StringUtils.hasText(ediDataEvent.getDocumentId()) ? ediDataEvent.getDocumentId() : "unknown-document";
+        return "edixml/" + documentId + ".xml";
     }
 }

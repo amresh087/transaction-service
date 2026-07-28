@@ -3,6 +3,8 @@ package com.retail.transaction.controller;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,6 +33,21 @@ public class TransactionController {
     @GetMapping("/transaction-types")
     public List<TransactionTypeResponse> getTransactionTypes() {
         return transactionService.getTransactionTypes();
+    }
+
+    @GetMapping(value = "/xml/{documentId}/{xmlType}", produces = MediaType.APPLICATION_XML_VALUE)
+    public ResponseEntity<String> getXmlByDocumentAndType(
+            @PathVariable String documentId,
+            @PathVariable String xmlType) {
+        try {
+            String xml = transactionService.getXmlByDocumentAndType(documentId, xmlType);
+            if (xml == null || xml.isBlank()) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.ok(xml);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(ex.getMessage());
+        }
     }
 
     @PostMapping("/transaction-types")
