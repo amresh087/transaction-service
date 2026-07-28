@@ -26,6 +26,8 @@ import com.retail.transaction.repository.TransactionTypeRepository;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import lombok.RequiredArgsConstructor;
+import com.retail.transaction.client.DocumentServiceClient;
+import com.retail.transaction.dto.TransformationJobStatusRequest;
 
 @Service
 @RequiredArgsConstructor
@@ -33,10 +35,11 @@ public class TransactionService {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionService.class);
 
-    private final TransactionTypeRepository transactionTypeRepository;
-    private final MinioClient minioClient;
-    private final KafkaTemplate<String, EdiDataEvent> ediDataEventKafkaTemplate;
-    private final EdiConverter ediConverter;
+        private final TransactionTypeRepository transactionTypeRepository;
+        private final MinioClient minioClient;
+        private final KafkaTemplate<String, EdiDataEvent> ediDataEventKafkaTemplate;
+        private final EdiConverter ediConverter;
+        private final DocumentServiceClient documentServiceClient;
 
     @Value("${minio.bucket-name}")
     private String bucketName;
@@ -165,6 +168,22 @@ public class TransactionService {
             ediDataEventKafkaTemplate.send(message);
             log.info("Published EDI data event to Kafka topic {} for object {}", ediDataEventTopic,
                     event.getObjectName());
+                    
+                        // Update transformation job status to indicate EDI XML was published
+                        if (event.getJobId() != null && !event.getJobId().isBlank()) {
+                                try {
+                                        java.util.UUID jobUuid = java.util.UUID.fromString(event.getJobId());
+                                        TransformationJobStatusRequest req = TransformationJobStatusRequest.builder()
+                                                        .jobName(event.getDocumentName())
+                                                        .payload("EDI_XML_TO_IDOC_XML")
+                                                        .build();
+                                        documentServiceClient.updateJobStatus(jobUuid, req);
+                                } catch (IllegalArgumentException ex) {
+                                        log.warn("Invalid jobId format when updating to EDI_XML_TO_IDOC_XML: {}", event.getJobId(), ex);
+                                } catch (Exception ex) {
+                                        log.warn("Failed to update job status to EDI_XML_TO_IDOC_XML for job {}", event.getJobId(), ex);
+                                }
+                        }
                     
         } catch (Exception ex) {
             log.error("Failed to read transformation file {} from MinIO", event.getObjectName(), ex);

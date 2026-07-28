@@ -32,7 +32,7 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/retail_db
     username: root
-    password: ellenverma
+    password: Kartik@123
 
   jpa:
     hibernate:
